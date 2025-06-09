@@ -6,5 +6,9 @@
 
 - LetsGo
   - 第1章 レッツGo
+- ch03
+  - 第3章までの成果物
 - proglog
   - その段階の最終成果物
+- StructureDataWithProtobuf
+  - protoとその生成物
