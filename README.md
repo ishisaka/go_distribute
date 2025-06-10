@@ -8,7 +8,9 @@
   - 第1章 レッツGo
 - ch03
   - 第3章までの成果物
+- ch04
+  - 第4章までの成果物
 - proglog
   - その段階の最終成果物
 - StructureDataWithProtobuf
-  - protoとその生成物
+  - 第2章の内容他
