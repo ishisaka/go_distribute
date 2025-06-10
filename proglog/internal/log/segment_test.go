@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	api "github.com/ishisaka/go_distribute/StructureDataWithProtobuf/api/v1"
+	api "github.com/ishisaka/go_distribute/proglog/api/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 )

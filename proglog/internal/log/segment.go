@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	api "github.com/ishisaka/go_distribute/StructureDataWithProtobuf/api/v1"
+	api "github.com/ishisaka/go_distribute/proglog/api/v1"
 	"google.golang.org/protobuf/proto"
 )
 

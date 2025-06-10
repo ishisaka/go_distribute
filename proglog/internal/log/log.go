@@ -1,7 +1,6 @@
 package log
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"path"
@@ -10,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	api "github.com/ishisaka/go_distribute/StructureDataWithProtobuf/api/v1"
+	api "github.com/ishisaka/go_distribute/proglog/api/v1"
 )
 
 // Log はスレッドセーフな永続化ログを管理するための構造体です。
@@ -120,7 +119,7 @@ func (l *Log) Read(off uint64) (*api.Record, error) {
 		}
 	}
 	if s == nil || s.nextOffset <= off {
-		return nil, fmt.Errorf("offset out of range: %d", off)
+		return nil, api.ErrOffsetOutOfRange{Offset: off}
 	}
 	return s.Read(off)
 }
