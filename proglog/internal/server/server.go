@@ -7,33 +7,30 @@ import (
 	"google.golang.org/grpc"
 )
 
-// Config は gRPC サーバーの設定を保持する構造体です。
-// CommitLog はログの追加や読み取り操作を管理します。
+// Config は、サーバーの設定を保持する構造体です。
+// CommitLog によるログ操作を管理します。
 type Config struct {
 	CommitLog CommitLog
 }
 
 var _ api.LogServer = (*grpcServer)(nil)
 
-// grpcServer は gRPC サーバーの実装を提供する構造体です。
-// api.UnimplementedLogServer を埋め込むことで将来的な互換性を保証します。
-// Config を利用してサーバーの挙動を設定します。
+// grpcServer は gRPC サーバーの主要な構造体です。
+// api.UnimplementedLogServer を埋め込み、LogServer インターフェースに準拠します。
+// Config を利用してログ操作を管理します。
 type grpcServer struct {
 	api.UnimplementedLogServer
 	*Config
 }
 
-// CommitLog はログにレコードを追加および取得するためのインターフェースです。
-// Append メソッドは新しいレコードを追加し、そのオフセットを返します。
-// Read メソッドは指定されたオフセットのレコードを取得します。
+// CommitLog は、ログへのデータの追加と読み取りを管理するインターフェースです。
+// Append メソッドでデータを追加し、Read メソッドで特定のオフセットのデータを読み取ります。
 type CommitLog interface {
 	Append(*api.Record) (uint64, error)
 	Read(uint64) (*api.Record, error)
 }
 
-// NewGRPCServer は gRPC サーバーを初期化して返す関数です。
-// 指定された設定に基づいて新しい gRPC サーバーを作成します。
-// サーバーの登録時にエラーが発生した場合は、そのエラーを返します。
+// NewGRPCServer は、指定された設定を使用して新しい gRPC サーバーを作成し、初期化します。
 func NewGRPCServer(config *Config) (*grpc.Server, error) {
 	gsrv := grpc.NewServer()
 	srv, err := newgrpcServer(config)
@@ -44,8 +41,8 @@ func NewGRPCServer(config *Config) (*grpc.Server, error) {
 	return gsrv, nil
 }
 
-// newgrpcServer 関数は指定された Config を使用して新しい grpcServer インスタンスを初期化して返します。
-// 実行中に発生したエラーも同時に返します。
+// newgrpcServer は、新しい gRPC サーバーを作成し、初期化します。
+// Config 構造体を受け取り、その設定を使用して grpcServer を生成します。
 func newgrpcServer(config *Config) (srv *grpcServer, err error) {
 	srv = &grpcServer{
 		Config: config,
@@ -53,8 +50,8 @@ func newgrpcServer(config *Config) (srv *grpcServer, err error) {
 	return srv, nil
 }
 
-// Produce はクライアントから受け取ったレコードをログに追加し、そのオフセットを含むレスポンスを返します。
-// コンテキストとリクエストを受け取り、レスポンスまたはエラーを返します。
+// Produce メソッドは、指定されたリクエストに基づき新しいレコードをログに追加し、結果のオフセットをレスポンスとして返します。
+// コンテキストを受け取り、エラーが発生した場合は nil とエラーを返します。
 func (s *grpcServer) Produce(ctx context.Context, req *api.ProduceRequest) (
 	*api.ProduceResponse, error) {
 	offset, err := s.CommitLog.Append(req.Record)
@@ -64,9 +61,8 @@ func (s *grpcServer) Produce(ctx context.Context, req *api.ProduceRequest) (
 	return &api.ProduceResponse{Offset: offset}, nil
 }
 
-// Consume は指定されたオフセットからレコードを読み取るリクエストを処理し、そのレコードをレスポンスとして返します。
-// コンテキストと ConsumeRequest を受け取り、ConsumeResponse またはエラーを返します。
-// オフセットが無効な場合、エラーを返します。
+// Consume メソッドは指定されたオフセットからログレコードを読み取り、レスポンスとして返します。
+// エラーが発生した場合は nil とエラーを返します。
 func (s *grpcServer) Consume(ctx context.Context, req *api.ConsumeRequest) (
 	*api.ConsumeResponse, error) {
 	record, err := s.CommitLog.Read(req.Offset)
@@ -76,9 +72,9 @@ func (s *grpcServer) Consume(ctx context.Context, req *api.ConsumeRequest) (
 	return &api.ConsumeResponse{Record: record}, nil
 }
 
-// ProduceStream はクライアントとの双方向ストリーミングRPCを処理し、リクエストを受け取りレスポンスを送信します。
-// クライアントから受信したリクエストを処理し、ログに追加して応答レスポンスを送信します。
-// ストリームが終了するかエラーが発生した場合に処理を停止してエラーを返します。
+// ProduceStream は双方向ストリーミングを実現する RPC メソッドです。リクエストを受信しレスポンスを送信します。
+// ストリーム内でエラーが発生した場合、その時点で処理を終了しエラーを返却します。
+// 各リクエストは Produce メソッドを呼び出すことで処理されます。
 func (s *grpcServer) ProduceStream(
 	stream api.Log_ProduceStreamServer,
 ) error {
@@ -97,8 +93,9 @@ func (s *grpcServer) ProduceStream(
 	}
 }
 
-// ConsumeStream はクライアントからのリクエストを受け取り、ストリームでレコードのレスポンスを連続的に送信します。
-// ストリームのコンテキストが終了するか、エラーが発生した場合に処理を終了します。
+// ConsumeStream はサーバーストリーミング RPC を処理し、指定されたオフセットのログレコードを継続的に送信します。
+// クライアントがストリームを終了させると、処理を終了して nil を返します。
+// 無効なオフセットの場合、適切なエラーハンドリングを行い、処理を続行します。
 func (s *grpcServer) ConsumeStream(
 	req *api.ConsumeRequest,
 	stream api.Log_ConsumeStreamServer,
@@ -123,4 +120,3 @@ func (s *grpcServer) ConsumeStream(
 		}
 	}
 }
-
