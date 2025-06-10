@@ -24,9 +24,9 @@ func TestServer(t *testing.T) {
 		client api.LogClient,
 		config *Config,
 	){
-		"produce/consume a message to/from the log succeeeds": testProduceConsume,
-		"produce/consume stream succeeds":                     testProduceConsumeStream,
-		"consume past log boundary fails":                     testConsumePastBoundary,
+		"produce/consume a message to/from the log succeeds": testProduceConsume,
+		"produce/consume stream succeeds":                    testProduceConsumeStream,
+		"consume past log boundary fails":                    testConsumePastBoundary,
 	} {
 		t.Run(scenario, func(t *testing.T) {
 			client, config, teardown := setupTest(t, nil)
@@ -64,7 +64,8 @@ func setupTest(t *testing.T, fn func(*Config)) (
 	clientOptions := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials())}
 	// gRPCクライアントを作成
-	cc, err := grpc.Dial(l.Addr().String(), clientOptions...)
+	// 古い（非推奨）: cc, err := grpc.Dial(l.Addr().String(), clientOptions...)
+	cc, err := grpc.NewClient(l.Addr().String(), clientOptions...)
 	require.NoError(t, err)
 
 	// log（ロジック）の作成
@@ -86,7 +87,7 @@ func setupTest(t *testing.T, fn func(*Config)) (
 	require.NoError(t, err)
 	// goルーチンでサーバーを動かす
 	go func() {
-		server.Serve(l)
+		_ = server.Serve(l)
 	}()
 
 	//Logサービスのクライアントの作成
@@ -94,17 +95,17 @@ func setupTest(t *testing.T, fn func(*Config)) (
 
 	// クライアントとConfig, 後処理のクロージャーを返す
 	return client, cfg, func() {
-		cc.Close()
+		_ = cc.Close()
 		server.Stop()
-		l.Close()
-		clog.Remove()
+		_ = l.Close()
+		_ = clog.Remove()
 	}
 }
 
 // testProduceConsume はメッセージの生成と消費をテストします。
 // クライアントを使用してログにメッセージを生成し、その後消費することで正しい動作を検証します。
 // テストデータは Produce と Consume の過程で正確に処理されることを確認します。
-func testProduceConsume(t *testing.T, client api.LogClient, config *Config) {
+func testProduceConsume(t *testing.T, client api.LogClient, _ *Config) {
 	ctx := context.Background()
 
 	want := &api.Record{
@@ -132,7 +133,7 @@ func testProduceConsume(t *testing.T, client api.LogClient, config *Config) {
 func testConsumePastBoundary(
 	t *testing.T,
 	client api.LogClient,
-	config *Config,
+	_ *Config,
 ) {
 	ctx := context.Background()
 
@@ -162,7 +163,7 @@ func testConsumePastBoundary(
 func testProduceConsumeStream(
 	t *testing.T,
 	client api.LogClient,
-	config *Config,
+	_ *Config,
 ) {
 	ctx := context.Background()
 
