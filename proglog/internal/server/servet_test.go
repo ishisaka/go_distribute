@@ -3,16 +3,17 @@ package server
 import (
 	"context"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 	"net"
 	"os"
 	"testing"
 
 	api "github.com/ishisaka/go_distribute/proglog/api/v1"
+	"github.com/ishisaka/go_distribute/proglog/internal/config"
 	"github.com/ishisaka/go_distribute/proglog/internal/log"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // TestServer はサーバーの動作を異なるシナリオでテストするための関数です。
@@ -29,9 +30,9 @@ func TestServer(t *testing.T) {
 		"consume past log boundary fails":                    testConsumePastBoundary,
 	} {
 		t.Run(scenario, func(t *testing.T) {
-			client, config, teardown := setupTest(t, nil)
+			client, config1, teardown := setupTest(t, nil)
 			defer teardown()
-			fn(t, client, config)
+			fn(t, client, config1)
 		})
 	}
 }
@@ -61,12 +62,27 @@ func setupTest(t *testing.T, fn func(*Config)) (
 	require.NoError(t, err)
 
 	// gRPCの接続設定
-	clientOptions := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials())}
-	// gRPCクライアントを作成
-	// 古い（非推奨）: cc, err := grpc.Dial(l.Addr().String(), clientOptions...)
-	cc, err := grpc.NewClient(l.Addr().String(), clientOptions...)
+	clientTLSConfig, err := config.SetupTLSConfig(config.TLSConfig{
+		CAFile: config.CAFile,
+	})
 	require.NoError(t, err)
+	clientCreds := credentials.NewTLS(clientTLSConfig)
+	// gRPCクライアントを作成
+	cc, err := grpc.NewClient(l.Addr().String(), grpc.WithTransportCredentials(clientCreds))
+	require.NoError(t, err)
+
+	//Logサービスのクライアントの作成
+	client = api.NewLogClient(cc)
+
+	// gRPCサーバーのTLS（Transport Layer Security）設定
+	serverTLSConfig, err := config.SetupTLSConfig(config.TLSConfig{
+		CertFile:      config.ServerCertFile,
+		KeyFile:       config.ServerKeyFile,
+		CAFile:        config.CAFile,
+		ServerAddress: l.Addr().String(),
+	})
+	require.NoError(t, err)
+	serverCreds := credentials.NewTLS(serverTLSConfig)
 
 	// log（ロジック）の作成
 	dir, err := os.MkdirTemp("", "server-test")
@@ -82,23 +98,21 @@ func setupTest(t *testing.T, fn func(*Config)) (
 	if fn != nil {
 		fn(cfg)
 	}
+
 	// gRPC Serverの作成
-	server, err := NewGRPCServer(cfg)
+	server, err := NewGRPCServer(cfg, grpc.Creds(serverCreds))
 	require.NoError(t, err)
+
 	// goルーチンでサーバーを動かす
 	go func() {
 		_ = server.Serve(l)
 	}()
-
-	//Logサービスのクライアントの作成
-	client = api.NewLogClient(cc)
 
 	// クライアントとConfig, 後処理のクロージャーを返す
 	return client, cfg, func() {
 		_ = cc.Close()
 		server.Stop()
 		_ = l.Close()
-		_ = clog.Remove()
 	}
 }
 

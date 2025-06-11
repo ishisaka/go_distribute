@@ -30,9 +30,15 @@ type CommitLog interface {
 	Read(uint64) (*api.Record, error)
 }
 
-// NewGRPCServer は、指定された設定を使用して新しい gRPC サーバーを作成し、初期化します。
-func NewGRPCServer(config *Config) (*grpc.Server, error) {
-	gsrv := grpc.NewServer()
+// NewGRPCServer は、新しい gRPC サーバーを作成して返す関数です。
+// 指定された設定および任意の gRPC サーバーオプションを使用して初期化されます。
+// Config 構造体に基づいて grpcServer を生成し、LogServer として登録します。
+// エラーが発生した場合は nil とエラーを返します。
+func NewGRPCServer(config *Config, grpcOpts ...grpc.ServerOption) (
+	*grpc.Server,
+	error,
+) {
+	gsrv := grpc.NewServer(grpcOpts...)
 	srv, err := newgrpcServer(config)
 	if err != nil {
 		return nil, err
