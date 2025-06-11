@@ -52,7 +52,7 @@ func newgrpcServer(config *Config) (srv *grpcServer, err error) {
 
 // Produce メソッドは、指定されたリクエストに基づき新しいレコードをログに追加し、結果のオフセットをレスポンスとして返します。
 // コンテキストを受け取り、エラーが発生した場合は nil とエラーを返します。
-func (s *grpcServer) Produce(ctx context.Context, req *api.ProduceRequest) (
+func (s *grpcServer) Produce(_ context.Context, req *api.ProduceRequest) (
 	*api.ProduceResponse, error) {
 	offset, err := s.CommitLog.Append(req.Record)
 	if err != nil {
@@ -63,7 +63,7 @@ func (s *grpcServer) Produce(ctx context.Context, req *api.ProduceRequest) (
 
 // Consume メソッドは指定されたオフセットからログレコードを読み取り、レスポンスとして返します。
 // エラーが発生した場合は nil とエラーを返します。
-func (s *grpcServer) Consume(ctx context.Context, req *api.ConsumeRequest) (
+func (s *grpcServer) Consume(_ context.Context, req *api.ConsumeRequest) (
 	*api.ConsumeResponse, error) {
 	record, err := s.CommitLog.Read(req.Offset)
 	if err != nil {
