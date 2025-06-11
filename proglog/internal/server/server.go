@@ -2,15 +2,34 @@ package server
 
 import (
 	"context"
-
 	api "github.com/ishisaka/go_distribute/proglog/api/v1"
+
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 )
 
-// Config は、サーバーの設定を保持する構造体です。
-// CommitLog によるログ操作を管理します。
+// Config は gRPC サーバー構築時に必要な設定情報を保持する構造体です。
+// CommitLog と Authorizer を管理します。
 type Config struct {
-	CommitLog CommitLog
+	CommitLog  CommitLog
+	Authorizer Authorizer
+}
+
+const (
+	objectWildcard = "*"
+	produceAction  = "produce"
+	consumeAction  = "consume"
+)
+
+// Authorizer インターフェースは、特定の主題、対象、アクションに対するアクセスを許可または拒否する機能を提供します。
+// 主に認可ロジックの実装を目的としています。
+type Authorizer interface {
+	Authorize(subject, object, action string) error
 }
 
 var _ api.LogServer = (*grpcServer)(nil)
@@ -38,6 +57,13 @@ func NewGRPCServer(config *Config, grpcOpts ...grpc.ServerOption) (
 	*grpc.Server,
 	error,
 ) {
+	// authenticateインタセプタをgRPCサーバに組み込む
+	grpcOpts = append(grpcOpts, grpc.StreamInterceptor(
+		grpc_middleware.ChainStreamServer(
+			grpc_auth.StreamServerInterceptor(authenticate),
+		)), grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+		grpc_auth.UnaryServerInterceptor(authenticate),
+	)))
 	gsrv := grpc.NewServer(grpcOpts...)
 	srv, err := newgrpcServer(config)
 	if err != nil {
@@ -58,8 +84,16 @@ func newgrpcServer(config *Config) (srv *grpcServer, err error) {
 
 // Produce メソッドは、指定されたリクエストに基づき新しいレコードをログに追加し、結果のオフセットをレスポンスとして返します。
 // コンテキストを受け取り、エラーが発生した場合は nil とエラーを返します。
-func (s *grpcServer) Produce(_ context.Context, req *api.ProduceRequest) (
+func (s *grpcServer) Produce(ctx context.Context, req *api.ProduceRequest) (
 	*api.ProduceResponse, error) {
+	// 認可できるのかの確認
+	if err := s.Authorizer.Authorize(
+		subject(ctx),
+		objectWildcard,
+		produceAction,
+	); err != nil {
+		return nil, err
+	}
 	offset, err := s.CommitLog.Append(req.Record)
 	if err != nil {
 		return nil, err
@@ -69,8 +103,16 @@ func (s *grpcServer) Produce(_ context.Context, req *api.ProduceRequest) (
 
 // Consume メソッドは指定されたオフセットからログレコードを読み取り、レスポンスとして返します。
 // エラーが発生した場合は nil とエラーを返します。
-func (s *grpcServer) Consume(_ context.Context, req *api.ConsumeRequest) (
+func (s *grpcServer) Consume(ctx context.Context, req *api.ConsumeRequest) (
 	*api.ConsumeResponse, error) {
+	// 認可できるかの確認
+	if err := s.Authorizer.Authorize(
+		subject(ctx),
+		objectWildcard,
+		consumeAction,
+	); err != nil {
+		return nil, err
+	}
 	record, err := s.CommitLog.Read(req.Offset)
 	if err != nil {
 		return nil, err
@@ -126,3 +168,35 @@ func (s *grpcServer) ConsumeStream(
 		}
 	}
 }
+
+// authenticate は gRPC の認証用インターセプタ関数です。
+// コンテキストからクライアント情報を取得し、認証情報に基づいて主題を設定します。
+// 必要な認証情報が不足している場合でも、エラーではなく適切な値を設定して処理を継続します。
+// 主題情報はコンテキストに保存され、後続の処理で利用されます。
+// エラーが発生した場合は context.Context と共にエラーを返却します。
+func authenticate(ctx context.Context) (context.Context, error) {
+	peer, ok := peer.FromContext(ctx)
+	if !ok {
+		return ctx, status.New(
+			codes.Unknown,
+			"couldn't find peer info",
+		).Err()
+	}
+
+	if peer.AuthInfo == nil {
+		return context.WithValue(ctx, subjectContextKey{}, ""), nil
+	}
+
+	tlsInfo := peer.AuthInfo.(credentials.TLSInfo)
+	subject := tlsInfo.State.VerifiedChains[0][0].Subject.CommonName
+	ctx = context.WithValue(ctx, subjectContextKey{}, subject)
+
+	return ctx, nil
+}
+
+// subject はコンテキストから現在の認証主体 (subject) を取得します。
+func subject(ctx context.Context) string {
+	return ctx.Value(subjectContextKey{}).(string)
+}
+
+type subjectContextKey struct{}

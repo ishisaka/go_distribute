@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"github.com/ishisaka/go_distribute/proglog/internal/auth"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
@@ -22,17 +23,22 @@ import (
 func TestServer(t *testing.T) {
 	for scenario, fn := range map[string]func(
 		t *testing.T,
-		client api.LogClient,
+		rootClient api.LogClient,
+		nobodyClient api.LogClient,
 		config *Config,
 	){
 		"produce/consume a message to/from the log succeeds": testProduceConsume,
 		"produce/consume stream succeeds":                    testProduceConsumeStream,
 		"consume past log boundary fails":                    testConsumePastBoundary,
+		"unauthorized fails":                                 testUnauthorized,
 	} {
 		t.Run(scenario, func(t *testing.T) {
-			client, config1, teardown := setupTest(t, nil)
+			rootClient,
+				nobodyClient,
+				config1,
+				teardown := setupTest(t, nil)
 			defer teardown()
-			fn(t, client, config1)
+			fn(t, rootClient, nobodyClient, config1)
 		})
 	}
 }
@@ -51,7 +57,8 @@ func TestServer(t *testing.T) {
 //	cfg Configのインスタンス
 //	teardown あと処理用のクロージャ
 func setupTest(t *testing.T, fn func(*Config)) (
-	client api.LogClient,
+	rootClient api.LogClient,
+	nobodyClient api.LogClient,
 	cfg *Config,
 	teardown func(),
 ) {
@@ -61,18 +68,40 @@ func setupTest(t *testing.T, fn func(*Config)) (
 	l, err := net.Listen("tcp", ":0")
 	require.NoError(t, err)
 
-	// gRPCの接続設定
-	clientTLSConfig, err := config.SetupTLSConfig(config.TLSConfig{
-		CAFile: config.CAFile,
-	})
-	require.NoError(t, err)
-	clientCreds := credentials.NewTLS(clientTLSConfig)
-	// gRPCクライアントを作成
-	cc, err := grpc.NewClient(l.Addr().String(), grpc.WithTransportCredentials(clientCreds))
-	require.NoError(t, err)
+	// クライアントの作成
+	newClient := func(crtPath, keyPath string) (
+		*grpc.ClientConn,
+		api.LogClient,
+		[]grpc.DialOption,
+	) {
+		tlsConfig, err := config.SetupTLSConfig(config.TLSConfig{
+			CertFile: crtPath,
+			KeyFile:  keyPath,
+			CAFile:   config.CAFile,
+			Server:   false,
+		})
+		require.NoError(t, err)
+		tlsCreds := credentials.NewTLS(tlsConfig)
+		opts := []grpc.DialOption{grpc.WithTransportCredentials(tlsCreds)}
+		conn, err := grpc.Dial(l.Addr().String(), opts...)
+		require.NoError(t, err)
+		client := api.NewLogClient(conn)
+		return conn, client, opts
+	}
 
-	//Logサービスのクライアントの作成
-	client = api.NewLogClient(cc)
+	// rootクライアント作成
+	var rootConn *grpc.ClientConn
+	rootConn, rootClient, _ = newClient(
+		config.RootClientCertFile,
+		config.RootClientKeyFile,
+	)
+
+	// nobodyクライアントの作成
+	var nobodyConn *grpc.ClientConn
+	nobodyConn, nobodyClient, _ = newClient(
+		config.NobodyClientCertFile,
+		config.NobodyClientKeyFile,
+	)
 
 	// gRPCサーバーのTLS（Transport Layer Security）設定
 	serverTLSConfig, err := config.SetupTLSConfig(config.TLSConfig{
@@ -80,6 +109,7 @@ func setupTest(t *testing.T, fn func(*Config)) (
 		KeyFile:       config.ServerKeyFile,
 		CAFile:        config.CAFile,
 		ServerAddress: l.Addr().String(),
+		Server:        true,
 	})
 	require.NoError(t, err)
 	serverCreds := credentials.NewTLS(serverTLSConfig)
@@ -92,8 +122,10 @@ func setupTest(t *testing.T, fn func(*Config)) (
 	require.NoError(t, err)
 
 	// 作ったlogをgRPC ServerのConfigに設定
+	authorizer := auth.New(config.ACLModelFile, config.ACLPolicyFile)
 	cfg = &Config{
-		CommitLog: clog,
+		CommitLog:  clog,
+		Authorizer: authorizer,
 	}
 	if fn != nil {
 		fn(cfg)
@@ -109,8 +141,9 @@ func setupTest(t *testing.T, fn func(*Config)) (
 	}()
 
 	// クライアントとConfig, 後処理のクロージャーを返す
-	return client, cfg, func() {
-		_ = cc.Close()
+	return rootClient, nobodyClient, cfg, func() {
+		_ = rootConn.Close()
+		_ = nobodyConn.Close()
 		server.Stop()
 		_ = l.Close()
 	}
@@ -119,7 +152,7 @@ func setupTest(t *testing.T, fn func(*Config)) (
 // testProduceConsume はメッセージの生成と消費をテストします。
 // クライアントを使用してログにメッセージを生成し、その後消費することで正しい動作を検証します。
 // テストデータは Produce と Consume の過程で正確に処理されることを確認します。
-func testProduceConsume(t *testing.T, client api.LogClient, _ *Config) {
+func testProduceConsume(t *testing.T, client, _ api.LogClient, cfg *Config) {
 	ctx := context.Background()
 
 	want := &api.Record{
@@ -146,8 +179,9 @@ func testProduceConsume(t *testing.T, client api.LogClient, _ *Config) {
 // testConsumePastBoundary はログ境界を越えた取得操作が失敗することをテストする関数です。
 func testConsumePastBoundary(
 	t *testing.T,
-	client api.LogClient,
-	_ *Config,
+	client,
+	_ api.LogClient,
+	cfg *Config,
 ) {
 	ctx := context.Background()
 
@@ -176,8 +210,9 @@ func testConsumePastBoundary(
 // テストでは、複数のメッセージの送信やオフセットの照合を行います。
 func testProduceConsumeStream(
 	t *testing.T,
-	client api.LogClient,
-	_ *Config,
+	client,
+	_ api.LogClient,
+	cfg *Config,
 ) {
 	ctx := context.Background()
 
@@ -226,5 +261,40 @@ func testProduceConsumeStream(
 				Offset: uint64(i),
 			})
 		}
+	}
+}
+
+// testUnauthorized は、未認証のクライアントがリソース操作を試みた際にエラーが発生することを確認するテストです。
+// クライアントの Produce および Consume メソッドが PermissionDenied エラーを返すことを検証します。
+func testUnauthorized(
+	t *testing.T,
+	_,
+	client api.LogClient,
+	config *Config,
+) {
+	ctx := context.Background()
+	produce, err := client.Produce(ctx,
+		&api.ProduceRequest{
+			Record: &api.Record{
+				Value: []byte("hello world"),
+			},
+		},
+	)
+	if produce != nil {
+		t.Fatalf("produce response should be nil")
+	}
+	gotCode, wantCode := status.Code(err), codes.PermissionDenied
+	if gotCode != wantCode {
+		t.Fatalf("got code: %d, want: %d", gotCode, wantCode)
+	}
+	consume, err := client.Consume(ctx, &api.ConsumeRequest{
+		Offset: 0,
+	})
+	if consume != nil {
+		t.Fatalf("consume response should be nil")
+	}
+	gotCode, wantCode = status.Code(err), codes.PermissionDenied
+	if gotCode != wantCode {
+		t.Fatalf("got code: %d, want: %d", gotCode, wantCode)
 	}
 }
