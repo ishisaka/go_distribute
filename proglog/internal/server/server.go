@@ -2,10 +2,21 @@ package server
 
 import (
 	"context"
+	"time"
+
 	api "github.com/ishisaka/go_distribute/proglog/api/v1"
 
 	grpcMiddleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpcAuth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
+	grpcZap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
+	grpcCtxtags "github.com/grpc-ecosystem/go-grpc-middleware/tags"
+
+	"go.opencensus.io/plugin/ocgrpc"
+	"go.opencensus.io/stats/view"
+	"go.opencensus.io/trace"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -57,13 +68,41 @@ func NewGRPCServer(config *Config, grpcOpts ...grpc.ServerOption) (
 	*grpc.Server,
 	error,
 ) {
-	// authenticateインタセプタをgRPCサーバに組み込む
+	// Zapの設定
+	logger := zap.L().Named("server")
+	zapOpts := []grpcZap.Option{
+		grpcZap.WithDurationField(
+			func(duration time.Duration) zapcore.Field {
+				return zap.Int64(
+					"grpc.time_ns",
+					duration.Nanoseconds(),
+				)
+			},
+		),
+	}
+
+	// OpenCensusがメトリクスとトレースを設定
+	// 全てのリクエストをトレース
+	trace.ApplyConfig(trace.Config{DefaultSampler: trace.AlwaysSample()})
+	err := view.Register(ocgrpc.DefaultServerViews...)
+	if err != nil {
+		return nil, err
+	}
+
 	grpcOpts = append(grpcOpts, grpc.StreamInterceptor(
 		grpcMiddleware.ChainStreamServer(
+			// インターセプターとしてZapログを組み込む
+			grpcCtxtags.StreamServerInterceptor(),
+			grpcZap.StreamServerInterceptor(logger, zapOpts...),
+			// インターセプターとしてauthenticateを組み込む
 			grpcAuth.StreamServerInterceptor(authenticate),
 		)), grpc.UnaryInterceptor(grpcMiddleware.ChainUnaryServer(
+		grpcCtxtags.UnaryServerInterceptor(),
+		grpcZap.UnaryServerInterceptor(logger, zapOpts...),
 		grpcAuth.UnaryServerInterceptor(authenticate),
-	)))
+	)),
+		grpc.StatsHandler(&ocgrpc.ServerHandler{}),
+	)
 	gsrv := grpc.NewServer(grpcOpts...)
 	srv, err := newgrpcServer(config)
 	if err != nil {
