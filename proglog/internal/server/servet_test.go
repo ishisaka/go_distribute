@@ -83,7 +83,7 @@ func setupTest(t *testing.T, fn func(*Config)) (
 		require.NoError(t, err)
 		tlsCreds := credentials.NewTLS(tlsConfig)
 		opts := []grpc.DialOption{grpc.WithTransportCredentials(tlsCreds)}
-		conn, err := grpc.Dial(l.Addr().String(), opts...)
+		conn, err := grpc.NewClient(l.Addr().String(), opts...)
 		require.NoError(t, err)
 		client := api.NewLogClient(conn)
 		return conn, client, opts
@@ -152,7 +152,7 @@ func setupTest(t *testing.T, fn func(*Config)) (
 // testProduceConsume はメッセージの生成と消費をテストします。
 // クライアントを使用してログにメッセージを生成し、その後消費することで正しい動作を検証します。
 // テストデータは Produce と Consume の過程で正確に処理されることを確認します。
-func testProduceConsume(t *testing.T, client, _ api.LogClient, cfg *Config) {
+func testProduceConsume(t *testing.T, client, _ api.LogClient, _ *Config) {
 	ctx := context.Background()
 
 	want := &api.Record{
@@ -181,7 +181,7 @@ func testConsumePastBoundary(
 	t *testing.T,
 	client,
 	_ api.LogClient,
-	cfg *Config,
+	_ *Config,
 ) {
 	ctx := context.Background()
 
@@ -212,7 +212,7 @@ func testProduceConsumeStream(
 	t *testing.T,
 	client,
 	_ api.LogClient,
-	cfg *Config,
+	_ *Config,
 ) {
 	ctx := context.Background()
 
@@ -270,7 +270,7 @@ func testUnauthorized(
 	t *testing.T,
 	_,
 	client api.LogClient,
-	config *Config,
+	_ *Config,
 ) {
 	ctx := context.Background()
 	produce, err := client.Produce(ctx,
