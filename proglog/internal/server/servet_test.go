@@ -43,19 +43,11 @@ func TestServer(t *testing.T) {
 	}
 }
 
-// setupTest はテスト環境を準備します。
-// テスト用の gRPC サーバーとクライアント、設定、クリーンアップ関数を返します。
-// 必要に応じて設定をカスタマイズするためのコールバック関数を受け取ります。
-// 引数:
-//
-//	t testing.Tのインスタンス
-//	fn Configを呼び出す関数
-//
-// 戻り値:
-//
-//	client gROCクライアントのインスタンス
-//	cfg Configのインスタンス
-//	teardown あと処理用のクロージャ
+// setupTest はテスト用の設定を初期化し、必要なクライアント、設定、後処理関数を提供します。
+// gRPCサーバーやクライアントの作成、TLS設定、リスナーの準備を行います。
+// rootClient, nobodyClient はそれぞれ異なる認証情報を持つクライアントです。
+// cfg には gRPC サーバーの設定情報が格納され、teardown はリソースを解放する関数です。
+// テストケースでの利用が想定され、t.Helper() によりヘルパー関数として登録されます。
 func setupTest(t *testing.T, fn func(*Config)) (
 	rootClient api.LogClient,
 	nobodyClient api.LogClient,
