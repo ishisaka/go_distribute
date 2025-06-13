@@ -4,8 +4,8 @@ import (
 	"context"
 	api "github.com/ishisaka/go_distribute/proglog/api/v1"
 
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
+	grpcMiddleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	grpcAuth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -59,10 +59,10 @@ func NewGRPCServer(config *Config, grpcOpts ...grpc.ServerOption) (
 ) {
 	// authenticateインタセプタをgRPCサーバに組み込む
 	grpcOpts = append(grpcOpts, grpc.StreamInterceptor(
-		grpc_middleware.ChainStreamServer(
-			grpc_auth.StreamServerInterceptor(authenticate),
-		)), grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-		grpc_auth.UnaryServerInterceptor(authenticate),
+		grpcMiddleware.ChainStreamServer(
+			grpcAuth.StreamServerInterceptor(authenticate),
+		)), grpc.UnaryInterceptor(grpcMiddleware.ChainUnaryServer(
+		grpcAuth.UnaryServerInterceptor(authenticate),
 	)))
 	gsrv := grpc.NewServer(grpcOpts...)
 	srv, err := newgrpcServer(config)
@@ -175,7 +175,7 @@ func (s *grpcServer) ConsumeStream(
 // 主題情報はコンテキストに保存され、後続の処理で利用されます。
 // エラーが発生した場合は context.Context と共にエラーを返却します。
 func authenticate(ctx context.Context) (context.Context, error) {
-	peer, ok := peer.FromContext(ctx)
+	p, ok := peer.FromContext(ctx)
 	if !ok {
 		return ctx, status.New(
 			codes.Unknown,
@@ -183,11 +183,11 @@ func authenticate(ctx context.Context) (context.Context, error) {
 		).Err()
 	}
 
-	if peer.AuthInfo == nil {
+	if p.AuthInfo == nil {
 		return context.WithValue(ctx, subjectContextKey{}, ""), nil
 	}
 
-	tlsInfo := peer.AuthInfo.(credentials.TLSInfo)
+	tlsInfo := p.AuthInfo.(credentials.TLSInfo)
 	subject := tlsInfo.State.VerifiedChains[0][0].Subject.CommonName
 	ctx = context.WithValue(ctx, subjectContextKey{}, subject)
 
