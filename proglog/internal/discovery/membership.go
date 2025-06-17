@@ -103,6 +103,8 @@ func (m *Membership) eventHandler() {
 				}
 				m.handleLeave(member)
 			}
+		default:
+			panic("unhandled default case")
 		}
 	}
 }
