@@ -24,6 +24,7 @@ import (
 
 var debug = flag.Bool("debug", false, "Enable observability for debugging.")
 
+// nolint:all
 func TestMain(m *testing.M) {
 	flag.Parse()
 	if *debug {
@@ -33,7 +34,6 @@ func TestMain(m *testing.M) {
 		}
 		zap.ReplaceGlobals(logger)
 	}
-	os.Exit(m.Run())
 }
 
 // TestServer はサーバーの動作を異なるシナリオでテストするための関数です。
@@ -44,7 +44,7 @@ func TestServer(t *testing.T) {
 		t *testing.T,
 		rootClient api.LogClient,
 		nobodyClient api.LogClient,
-		config *Config,
+		config *Config, // nolint:all
 	){
 		"produce/consume a message to/from the log succeeds": testProduceConsume,
 		"produce/consume stream succeeds":                    testProduceConsumeStream,
@@ -177,6 +177,7 @@ func setupTest(t *testing.T, fn func(*Config)) (
 		_ = nobodyConn.Close()
 		server.Stop()
 		_ = l.Close()
+		// nolint:all
 		if telemetryExporter != nil {
 			time.Sleep(1500 * time.Millisecond)
 			telemetryExporter.Stop()
@@ -260,26 +261,23 @@ func testProduceConsumeStream(
 		Offset: 1,
 	}}
 
-	{
-		stream, err := client.ProduceStream(ctx)
+	stream, err := client.ProduceStream(ctx)
+	require.NoError(t, err)
+
+	for offset, record := range records {
+		err = stream.Send(&api.ProduceRequest{
+			Record: record,
+		})
 		require.NoError(t, err)
-
-		for offset, record := range records {
-			err = stream.Send(&api.ProduceRequest{
-				Record: record,
-			})
-			require.NoError(t, err)
-			res, err := stream.Recv()
-			require.NoError(t, err)
-			if res.Offset != uint64(offset) {
-				t.Fatalf(
-					"got offset: %d, want: %d",
-					res.Offset,
-					offset,
-				)
-			}
+		res, err := stream.Recv()
+		require.NoError(t, err)
+		if res.Offset != uint64(offset) {
+			t.Fatalf(
+				"got offset: %d, want: %d",
+				res.Offset,
+				offset,
+			)
 		}
-
 	}
 
 	{

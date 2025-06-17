@@ -113,6 +113,7 @@ func (l *Log) Read(off uint64) (*api.Record, error) {
 	defer l.mu.RUnlock()
 	var s *segment
 	for _, segment := range l.segments {
+		// nolint:all
 		if segment.baseOffset <= off && off < segment.nextOffset {
 			s = segment
 			break
@@ -173,6 +174,7 @@ func (l *Log) HighestOffset() (uint64, error) {
 
 // highestOffset は、現在のセグメントにおける最大のオフセットを計算して返します。
 // セグメントが空の場合は 0 を返します。
+// nolint:revive
 func (l *Log) highestOffset() (uint64, error) {
 	off := l.segments[len(l.segments)-1].nextOffset
 	if off == 0 {

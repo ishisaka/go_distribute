@@ -112,6 +112,7 @@ func (s *segment) Remove() error {
 	if err := os.Remove(s.index.Name()); err != nil {
 		return err
 	}
+	// nolint:revive
 	if err := os.Remove(s.store.Name()); err != nil {
 		return err
 	}
@@ -123,6 +124,7 @@ func (s *segment) Close() error {
 	if err := s.index.Close(); err != nil {
 		return err
 	}
+	// nolint:revive
 	if err := s.store.Close(); err != nil {
 		return err
 	}

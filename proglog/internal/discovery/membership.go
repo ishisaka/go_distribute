@@ -80,7 +80,11 @@ func (m *Membership) setupSerf() (err error) {
 // Join は指定されたノードの参加処理を行い、エラーがある場合は返します。
 // Leave は指定されたノードの離脱処理を行い、エラーがある場合は返します。
 type Handler interface {
+
+	// Join は指定されたノードをクラスタに参加させる処理を行います。エラーが発生した場合はそのエラーを返します。
 	Join(name, addr string) error
+
+	// Leave は指定されたノードをクラスタから離脱させる処理を行います。エラーが発生した場合はそのエラーを返します。
 	Leave(name string) error
 }
 

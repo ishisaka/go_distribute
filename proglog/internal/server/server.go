@@ -40,6 +40,8 @@ const (
 // Authorizer インターフェースは、特定の主題、対象、アクションに対するアクセスを許可または拒否する機能を提供します。
 // 主に認可ロジックの実装を目的としています。
 type Authorizer interface {
+
+	// Authorize メソッドは、指定された主題、対象、アクションに基づきアクセス権を確認し、適切なエラーを返します。
 	Authorize(subject, object, action string) error
 }
 
@@ -56,7 +58,13 @@ type grpcServer struct {
 // CommitLog は、ログへのデータの追加と読み取りを管理するインターフェースです。
 // Append メソッドでデータを追加し、Read メソッドで特定のオフセットのデータを読み取ります。
 type CommitLog interface {
+
+	// Append は新しいレコードをログに追加し、そのレコードのオフセットを返します。
+	// エラーが発生した場合、エラーを返します。
 	Append(*api.Record) (uint64, error)
+
+	// Read は指定されたオフセットに対応するログレコードを取得します。
+	// 存在しない場合はエラーを返します。
 	Read(uint64) (*api.Record, error)
 }
 
@@ -114,6 +122,7 @@ func NewGRPCServer(config *Config, grpcOpts ...grpc.ServerOption) (
 
 // newgrpcServer は、新しい gRPC サーバーを作成し、初期化します。
 // Config 構造体を受け取り、その設定を使用して grpcServer を生成します。
+// nolint:all
 func newgrpcServer(config *Config) (srv *grpcServer, err error) {
 	srv = &grpcServer{
 		Config: config,
@@ -226,7 +235,13 @@ func authenticate(ctx context.Context) (context.Context, error) {
 		return context.WithValue(ctx, subjectContextKey{}, ""), nil
 	}
 
-	tlsInfo := p.AuthInfo.(credentials.TLSInfo)
+	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
+	if !ok {
+		return ctx, status.New(
+			codes.Unauthenticated,
+			"couldn't find TLS info",
+		).Err()
+	}
 	subject := tlsInfo.State.VerifiedChains[0][0].Subject.CommonName
 	ctx = context.WithValue(ctx, subjectContextKey{}, subject)
 
@@ -235,7 +250,11 @@ func authenticate(ctx context.Context) (context.Context, error) {
 
 // subject はコンテキストから現在の認証主体 (subject) を取得します。
 func subject(ctx context.Context) string {
-	return ctx.Value(subjectContextKey{}).(string)
+	v, ok := ctx.Value(subjectContextKey{}).(string)
+	if !ok {
+		return ""
+	}
+	return v
 }
 
 type subjectContextKey struct{}
