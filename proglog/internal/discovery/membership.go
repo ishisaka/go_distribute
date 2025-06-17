@@ -104,7 +104,7 @@ func (m *Membership) eventHandler() {
 				m.handleLeave(member)
 			}
 		default:
-			panic("unhandled default case")
+			m.logger.Warn("unknown event", zap.String("event", e.EventType().String()))
 		}
 	}
 }
