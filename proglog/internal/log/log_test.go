@@ -1,6 +1,7 @@
 package log
 
 import (
+	"errors"
 	"io"
 	"os"
 	"testing"
@@ -23,7 +24,7 @@ func TestLog(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			dir, err := os.MkdirTemp("", "store-test")
 			require.NoError(t, err)
-			defer os.RemoveAll(dir)
+			defer func() { _ = os.RemoveAll(dir) }()
 
 			c := Config{}
 			c.Segment.MaxStoreBytes = 32
@@ -36,32 +37,33 @@ func TestLog(t *testing.T) {
 }
 
 func testAppendRead(t *testing.T, log *Log) {
-	append := &api.Record{
+	apiAppend := &api.Record{
 		Value: []byte("hello world"),
 	}
-	off, err := log.Append(append)
+	off, err := log.Append(apiAppend)
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), off)
 
 	read, err := log.Read(off)
 	require.NoError(t, err)
-	require.Equal(t, append.Value, read.Value)
+	require.Equal(t, apiAppend.Value, read.Value)
 	require.NoError(t, log.Close())
 }
 
 func testOutOfRangeErr(t *testing.T, log *Log) {
 	read, err := log.Read(1)
 	require.Nil(t, read)
-	apiErr := err.(api.ErrOffsetOutOfRange)
+	var apiErr api.ErrOffsetOutOfRange
+	errors.As(err, &apiErr)
 	require.Equal(t, uint64(1), apiErr.Offset)
 }
 
 func testInitExisting(t *testing.T, o *Log) {
-	append := &api.Record{
+	apiApend := &api.Record{
 		Value: []byte("hello world"),
 	}
 	for i := 0; i < 3; i++ {
-		_, err := o.Append(append)
+		_, err := o.Append(apiApend)
 		require.NoError(t, err)
 	}
 	require.NoError(t, o.Close())
@@ -86,10 +88,10 @@ func testInitExisting(t *testing.T, o *Log) {
 }
 
 func testReader(t *testing.T, log *Log) {
-	append := &api.Record{
+	apiAppend := &api.Record{
 		Value: []byte("hello world"),
 	}
-	off, err := log.Append(append)
+	off, err := log.Append(apiAppend)
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), off)
 
@@ -100,16 +102,16 @@ func testReader(t *testing.T, log *Log) {
 	read := &api.Record{}
 	err = proto.Unmarshal(b[lenWidth:], read)
 	require.NoError(t, err)
-	require.Equal(t, append.Value, read.Value)
+	require.Equal(t, apiAppend.Value, read.Value)
 	require.NoError(t, log.Close())
 }
 
 func testTruncate(t *testing.T, log *Log) {
-	append := &api.Record{
+	apiAppend := &api.Record{
 		Value: []byte("hello world"),
 	}
 	for i := 0; i < 3; i++ {
-		_, err := log.Append(append)
+		_, err := log.Append(apiAppend)
 		require.NoError(t, err)
 	}
 

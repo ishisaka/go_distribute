@@ -17,7 +17,7 @@ var (
 func TestStoreAppendRead(t *testing.T) {
 	f, err := os.CreateTemp("", "store_append_read_test")
 	require.NoError(t, err)
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 
 	s, err := newStore(f)
 	require.NoError(t, err)
@@ -83,7 +83,7 @@ func testReadAt(t *testing.T, s *store) {
 func TestStoreClose(t *testing.T) {
 	f, err := os.CreateTemp("", "store_close_test")
 	require.NoError(t, err)
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	s, err := newStore(f)
 	require.NoError(t, err)
 	_, _, err = s.Append(write)
@@ -103,7 +103,7 @@ func TestStoreClose(t *testing.T) {
 // openFile は指定された名前のファイルを開き、ファイルポインタ、ファイルサイズ、エラーを返します。
 // ファイルが存在しない場合、新規作成されます。
 // ファイル操作時に読み取り、書き込み、追記モードでオープンします。
-func openFile(name string) (file *os.File, size int64, err error)  {
+func openFile(name string) (file *os.File, size int64, err error) {
 	f, err := os.OpenFile(
 		name,
 		os.O_RDWR|os.O_CREATE|os.O_APPEND,

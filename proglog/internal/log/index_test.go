@@ -11,7 +11,7 @@ import (
 func TestIndex(t *testing.T) {
 	f, err := os.CreateTemp(os.TempDir(), "index_test")
 	require.NoError(t, err)
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 
 	c := Config{}
 	c.Segment.MaxIndexBytes = 1024

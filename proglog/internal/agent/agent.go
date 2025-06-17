@@ -90,7 +90,7 @@ func (a *Agent) setupLogger() error {
 func (a *Agent) setupLog() error {
 	var err error
 	a.log, err = log.NewLog(
-		a.Config.DataDir,
+		a.DataDir,
 		log.Config{},
 	)
 	return err
@@ -99,16 +99,16 @@ func (a *Agent) setupLog() error {
 // setupServer は gRPC サーバーを初期化して起動するメソッドです。設定ファイルとセキュリティ情報を使用します。
 func (a *Agent) setupServer() error {
 	authorizer := auth.New(
-		a.Config.ACLModelFile,
-		a.Config.ACLPolicyFile,
+		a.ACLModelFile,
+		a.ACLPolicyFile,
 	)
 	serverConfig := &server.Config{
 		CommitLog:  a.log,
 		Authorizer: authorizer,
 	}
 	var opts []grpc.ServerOption
-	if a.Config.ServerTLSConfig != nil {
-		creds := credentials.NewTLS(a.Config.ServerTLSConfig)
+	if a.ServerTLSConfig != nil {
+		creds := credentials.NewTLS(a.ServerTLSConfig)
 		opts = append(opts, grpc.Creds(creds))
 	}
 	var err error
@@ -116,7 +116,7 @@ func (a *Agent) setupServer() error {
 	if err != nil {
 		return err
 	}
-	rpcAddr, err := a.Config.RPCAddr()
+	rpcAddr, err := a.RPCAddr()
 	if err != nil {
 		return err
 	}
@@ -136,14 +136,14 @@ func (a *Agent) setupServer() error {
 // RPC アドレスを取得し、TLS 設定も考慮した gRPC 接続を作成します。
 // replicator と discovery パッケージを用いてノードの同期および参加を構成します。
 func (a *Agent) setupMembership() error {
-	rpcAddr, err := a.Config.RPCAddr()
+	rpcAddr, err := a.RPCAddr()
 	if err != nil {
 		return err
 	}
 	var opts []grpc.DialOption
-	if a.Config.PeerTLSConfig != nil {
+	if a.PeerTLSConfig != nil {
 		opts = append(opts, grpc.WithTransportCredentials(
-			credentials.NewTLS(a.Config.PeerTLSConfig),
+			credentials.NewTLS(a.PeerTLSConfig),
 		),
 		)
 	}
@@ -157,12 +157,12 @@ func (a *Agent) setupMembership() error {
 		LocalServer: client,
 	}
 	a.membership, err = discovery.New(a.replicator, discovery.Config{
-		NodeName: a.Config.NodeName,
-		BindAddr: a.Config.BindAddr,
+		NodeName: a.NodeName,
+		BindAddr: a.BindAddr,
 		Tags: map[string]string{
 			"rpc_addr": rpcAddr,
 		},
-		StartJoinAddrs: a.Config.StartJoinAddrs,
+		StartJoinAddrs: a.StartJoinAddrs,
 	})
 	return err
 }

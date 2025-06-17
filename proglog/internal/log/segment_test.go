@@ -14,7 +14,7 @@ import (
 // データ書き込み、読み出し、容量上限の判定を含むテストを行います。
 func TestSegment(t *testing.T) {
 	dir, _ := os.MkdirTemp("", "segment-test")
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	want := &api.Record{Value: []byte("hello world")}
 
