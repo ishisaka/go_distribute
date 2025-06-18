@@ -22,9 +22,11 @@ import (
 	"google.golang.org/grpc"
 )
 
+// debug は観測可能性を有効にしてデバッグ出力を提供するためのフラグです。
+// デフォルト値は false で、`-debug` フラグで有効化できます。
 var debug = flag.Bool("debug", false, "Enable observability for debugging.")
 
-// nolint:all
+// TestMain はテストのエントリーポイントとなる関数です。テスト実行前にフラグやロガーの初期化を行います。
 func TestMain(m *testing.M) {
 	flag.Parse()
 	if *debug {
@@ -34,11 +36,10 @@ func TestMain(m *testing.M) {
 		}
 		zap.ReplaceGlobals(logger)
 	}
+	os.Exit(m.Run())
 }
 
-// TestServer はサーバーの動作を異なるシナリオでテストするための関数です。
-// 各シナリオごとに対応するテスト関数が実行されます。
-// テストごとに設定を初期化し、後処理を行います。
+// TestServer はサーバーのテストを実行し、複数のシナリオで挙動を検証します。
 func TestServer(t *testing.T) {
 	for scenario, fn := range map[string]func(
 		t *testing.T,
@@ -46,10 +47,10 @@ func TestServer(t *testing.T) {
 		nobodyClient api.LogClient,
 		config *Config, // nolint:all
 	){
-		"produce/consume a message to/from the log succeeds": testProduceConsume,
-		"produce/consume stream succeeds":                    testProduceConsumeStream,
-		"consume past log boundary fails":                    testConsumePastBoundary,
-		"unauthorized fails":                                 testUnauthorized,
+		"produce/consume a message to/from the log succeeeds": testProduceConsume,
+		"produce/consume stream succeeds":                     testProduceConsumeStream,
+		"consume past log boundary fails":                     testConsumePastBoundary,
+		"unauthorized fails":                                  testUnauthorized,
 	} {
 		t.Run(scenario, func(t *testing.T) {
 			rootClient,
@@ -62,11 +63,12 @@ func TestServer(t *testing.T) {
 	}
 }
 
-// setupTest はテスト用の設定を初期化し、必要なクライアント、設定、後処理関数を提供します。
-// gRPCサーバーやクライアントの作成、TLS設定、リスナーの準備を行います。
-// rootClient, nobodyClient はそれぞれ異なる認証情報を持つクライアントです。
-// cfg には gRPC サーバーの設定情報が格納され、teardown はリソースを解放する関数です。
-// テストケースでの利用が想定され、t.Helper() によりヘルパー関数として登録されます。
+// setupTest は gRPC サーバーのテストをセットアップする関数です。テスト用クライアントとサーバーを初期化します。
+// t はテストのコンテキストです。
+// fn は Config を変更可能なカスタム関数です。
+// rootClient と nobodyClient はそれぞれのクライアントを返します。
+// cfg はサーバー構成を返します。
+// teardown はサーバーやリソースを解放する関数を返します。
 func setupTest(t *testing.T, fn func(*Config)) (
 	rootClient api.LogClient,
 	nobodyClient api.LogClient,
@@ -75,18 +77,16 @@ func setupTest(t *testing.T, fn func(*Config)) (
 ) {
 	t.Helper()
 
-	// リスナーの作成
-	l, err := net.Listen("tcp", ":0")
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
-	// クライアントの作成
-	newClient := func(crtPath, keyPath string) (
+	newClient := func(certPath, keyPath string) (
 		*grpc.ClientConn,
 		api.LogClient,
 		[]grpc.DialOption,
 	) {
 		tlsConfig, err := config.SetupTLSConfig(config.TLSConfig{
-			CertFile: crtPath,
+			CertFile: certPath,
 			KeyFile:  keyPath,
 			CAFile:   config.CAFile,
 			Server:   false,
@@ -100,21 +100,17 @@ func setupTest(t *testing.T, fn func(*Config)) (
 		return conn, client, opts
 	}
 
-	// rootクライアント作成
 	var rootConn *grpc.ClientConn
 	rootConn, rootClient, _ = newClient(
 		config.RootClientCertFile,
 		config.RootClientKeyFile,
 	)
 
-	// nobodyクライアントの作成
 	var nobodyConn *grpc.ClientConn
 	nobodyConn, nobodyClient, _ = newClient(
 		config.NobodyClientCertFile,
 		config.NobodyClientKeyFile,
 	)
-
-	// gRPCサーバーのTLS（Transport Layer Security）設定
 	serverTLSConfig, err := config.SetupTLSConfig(config.TLSConfig{
 		CertFile:      config.ServerCertFile,
 		KeyFile:       config.ServerKeyFile,
@@ -125,23 +121,13 @@ func setupTest(t *testing.T, fn func(*Config)) (
 	require.NoError(t, err)
 	serverCreds := credentials.NewTLS(serverTLSConfig)
 
-	// log（ロジック）の作成
 	dir, err := os.MkdirTemp("", "server-test")
 	require.NoError(t, err)
 
 	clog, err := log.NewLog(dir, log.Config{})
 	require.NoError(t, err)
 
-	// 作ったlogをgRPC ServerのConfigに設定
 	authorizer := auth.New(config.ACLModelFile, config.ACLPolicyFile)
-	cfg = &Config{
-		CommitLog:  clog,
-		Authorizer: authorizer,
-	}
-	if fn != nil {
-		fn(cfg)
-	}
-
 	var telemetryExporter *exporter.LogExporter
 	if *debug {
 		metricsLogFile, err := os.CreateTemp("", "metrics-*.log")
@@ -162,16 +148,20 @@ func setupTest(t *testing.T, fn func(*Config)) (
 		require.NoError(t, err)
 	}
 
-	// gRPC Serverの作成
+	cfg = &Config{
+		CommitLog:  clog,
+		Authorizer: authorizer,
+	}
+	if fn != nil {
+		fn(cfg)
+	}
 	server, err := NewGRPCServer(cfg, grpc.Creds(serverCreds))
 	require.NoError(t, err)
 
-	// goルーチンでサーバーを動かす
 	go func() {
 		_ = server.Serve(l)
 	}()
 
-	// クライアントとConfig, 後処理のクロージャーを返す
 	return rootClient, nobodyClient, cfg, func() {
 		_ = rootConn.Close()
 		_ = nobodyConn.Close()
@@ -186,9 +176,8 @@ func setupTest(t *testing.T, fn func(*Config)) (
 	}
 }
 
-// testProduceConsume はメッセージの生成と消費をテストします。
-// クライアントを使用してログにメッセージを生成し、その後消費することで正しい動作を検証します。
-// テストデータは Produce と Consume の過程で正確に処理されることを確認します。
+// testProduceConsume はログクライアントを使用してメッセージの書き込みと読み込みをテストします。
+// メッセージが正しいオフセットと値でプロデュース・コンシュームされることを確認します。
 func testProduceConsume(t *testing.T, client, _ api.LogClient, _ *Config) {
 	ctx := context.Background()
 
@@ -213,11 +202,12 @@ func testProduceConsume(t *testing.T, client, _ api.LogClient, _ *Config) {
 	require.Equal(t, want.Offset, consume.Record.Offset)
 }
 
-// testConsumePastBoundary はログ境界を越えた取得操作が失敗することをテストする関数です。
+// testConsumePastBoundary 関数は、ログの境界外のオフセットを消費する際にエラーが発生することをテストします。
+// Produce リクエストでログにメッセージを追加し、Consume リクエストで存在しないオフセットを指定して検証します。
+// エラーコードが codes.OutOfRange であることを確認します。
 func testConsumePastBoundary(
 	t *testing.T,
-	client,
-	_ api.LogClient,
+	client, _ api.LogClient,
 	_ *Config,
 ) {
 	ctx := context.Background()
@@ -242,13 +232,14 @@ func testConsumePastBoundary(
 	}
 }
 
-// testProduceConsumeStream は、クライアントでのストリーム型プロデューサーとコンシューマーの動作をテストします。
-// クライアントがメッセージのストリームを正常に送受信するかを確認します。
-// テストでは、複数のメッセージの送信やオフセットの照合を行います。
+// testProduceConsumeStream は ProduceStream および ConsumeStream API の動作をテストする関数です。
+// gRPC サーバーを通じたストリーミングの生成と消費が正しく行われることを検証します。
+// ProduceStream を使用してメッセージを送信し、期待するオフセットが返されることを確認します。
+// ConsumeStream を使用してストリームからメッセージを受信し、予想されるデータと一致することを確認します。
+// テスト結果は gRPC ストリーミング操作の成功と失敗を詳細に示します。
 func testProduceConsumeStream(
 	t *testing.T,
-	client,
-	_ api.LogClient,
+	client, _ api.LogClient,
 	_ *Config,
 ) {
 	ctx := context.Background()
@@ -298,8 +289,9 @@ func testProduceConsumeStream(
 	}
 }
 
-// testUnauthorized は、未認証のクライアントがリソース操作を試みた際にエラーが発生することを確認するテストです。
-// クライアントの Produce および Consume メソッドが PermissionDenied エラーを返すことを検証します。
+// testUnauthorized は権限のないクライアントによる Produce や Consume の操作が拒否されることを検証します。
+// Produce 操作のレスポンスが nil であり、エラーコードが PermissionDenied であるかを確認します。
+// Consume 操作のレスポンスが nil であり、エラーコードが PermissionDenied であるかを確認します。
 func testUnauthorized(
 	t *testing.T,
 	_,
