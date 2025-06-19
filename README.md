@@ -6,11 +6,15 @@
 
 - LetsGo
   - 第1章 レッツGo
+- StructureDataWithProtobuf
+  - 第2章の内容他
 - ch03
   - 第3章までの成果物
 - ch04
   - 第4章までの成果物
-- proglog
+- ch05
+  - 第5章までの成果物
+- ch06
+  - 第6章までの成果物
+- **proglog**
   - その段階の最終成果物
-- StructureDataWithProtobuf
-  - 第2章の内容他
